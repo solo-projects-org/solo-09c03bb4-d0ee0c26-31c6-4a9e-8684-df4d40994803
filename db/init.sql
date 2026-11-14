@@ -55,5 +55,35 @@ CROSS JOIN LATERAL (SELECT round((1 + random() * 499)::numeric, 2) AS amount) AS
 CREATE INDEX idx_orders_merchant   ON settlement_orders (merchant_id);
 CREATE INDEX idx_orders_settle_date ON settlement_orders (settle_date);
 
+-- 对账演示数据：2026-11-20 的确定性订单（在随机数据日期范围之外，互不干扰），
+-- 与网页可下载的样例渠道 CSV（/static/samples/channel_2026-11-20.csv）对应，
+-- 用于演示「渠道独有 / 库内独有 / 字段不符 / 同号冲突」四类差异。
+INSERT INTO settlement_orders (order_no, merchant_id, amount, fee, status, settle_date) VALUES
+-- 001..010：与 CSV 完全一致（10 单一致）
+('CH20261120-001', 11, 120.00, 0.72, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-002', 12,  88.50, 0.53, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-003', 13,  45.00, 0.27, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-004', 14, 230.00, 1.38, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-005', 15,  19.90, 0.12, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-006', 16, 500.00, 3.00, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-007', 17,  76.20, 0.46, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-008', 18, 134.00, 0.80, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-009', 19,  62.50, 0.38, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-010', 20,  99.99, 0.60, 'SETTLED', DATE '2026-11-20'),
+-- 011..014：CSV 中对应行被改动（金额 / 手续费 / 商户 / 金额+手续费 不符）
+('CH20261120-011', 21, 100.00, 0.60, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-012', 22, 200.00, 1.20, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-013', 23, 150.00, 0.90, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-014', 25, 300.00, 1.80, 'SETTLED', DATE '2026-11-20'),
+-- 015..016：库内独有（CSV 没有这两单）
+('CH20261120-015', 26,  66.00, 0.40, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-016', 27,  77.00, 0.46, 'SETTLED', DATE '2026-11-20'),
+-- 017：库内同号重复（两行金额不同）-> 冲突，不做配对
+('CH20261120-017', 28,  50.00, 0.30, 'SETTLED', DATE '2026-11-20'),
+('CH20261120-017', 28,  55.00, 0.33, 'SETTLED', DATE '2026-11-20'),
+-- 018：CSV 侧同号重复 -> 冲突
+('CH20261120-018', 29,  90.00, 0.54, 'SETTLED', DATE '2026-11-20');
+-- 另：CSV 中 CH20261120-101 / -102 库内没有 -> 渠道独有
+
 ANALYZE merchants;
 ANALYZE settlement_orders;

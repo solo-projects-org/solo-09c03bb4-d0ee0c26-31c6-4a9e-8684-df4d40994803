@@ -1,4 +1,4 @@
-name: nestloop-compare
+name: settlement-tools
 
 services:
   db:

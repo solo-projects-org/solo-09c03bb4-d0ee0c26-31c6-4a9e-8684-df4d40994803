@@ -1,4 +1,4 @@
-"""FastAPI 入口：网页 + 对照批次 API + 样表补记 API。"""
+"""FastAPI 入口：网页 + 渠道流水核对 API + 对照批次 API + 补记 API。"""
 from __future__ import annotations
 
 import asyncio
@@ -8,12 +8,14 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import asyncpg
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from plans import structure_lines
+from recon import ReconStore, ReconTask
+from reconrun import ReconRunner
 from runner import BatchRunner
 from sqlcheck import validate_select_sql
 from store import Batch, BatchStore
@@ -22,9 +24,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/settlement"
 )
+MAX_CSV_BYTES = 10 * 1024 * 1024  # 上传 CSV 大小上限 10MB
 
 store = BatchStore(capacity=50)
 runner = BatchRunner(DATABASE_URL, store)
+recon_store = ReconStore(task_capacity=100)
+recon_runner = ReconRunner(DATABASE_URL, recon_store)
 pool: asyncpg.Pool | None = None
 
 
@@ -45,8 +50,104 @@ async def lifespan(app: FastAPI):
     await pool.close()
 
 
-app = FastAPI(title="结算 SQL 计划对照台", lifespan=lifespan)
+app = FastAPI(title="结算对账与计划对照台", lifespan=lifespan)
 
+
+# ---------------- 渠道流水每日核对 ----------------
+
+@app.post("/api/recon/tasks", status_code=201)
+async def create_recon_task(
+    settle_date: str = Form(...), file: UploadFile = File(...)
+):
+    """上传某结算日的渠道流水 CSV，后台核对并（按提交序号）发布报告。"""
+    try:
+        day = date.fromisoformat(settle_date.strip())
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="结算日格式应为 YYYY-MM-DD")
+    data = await file.read(MAX_CSV_BYTES + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail="文件为空")
+    if len(data) > MAX_CSV_BYTES:
+        raise HTTPException(status_code=400, detail="CSV 超过 10MB 上限")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="文件需为 UTF-8 编码")
+    task = ReconTask(
+        settle_date=day.isoformat(),
+        filename=file.filename or "upload.csv",
+        seq=recon_store.next_seq(),
+    )
+    recon_store.add_task(task)
+    recon_runner.start(task, text)
+    return task.to_dict()
+
+
+@app.get("/api/recon/tasks")
+async def list_recon_tasks():
+    return {"tasks": [t.to_dict() for t in recon_store.list_tasks()]}
+
+
+@app.get("/api/recon/reports")
+async def list_recon_reports():
+    """每个结算日的当前已发布报告（摘要）+ 该日最新任务状态（用于提示未发布原因）。"""
+    reports = []
+    for rep in recon_store.list_reports():
+        latest = recon_store.latest_task_for(rep.settle_date)
+        reports.append(
+            {
+                "settle_date": rep.settle_date,
+                "task_id": rep.task_id,
+                "seq": rep.seq,
+                "published_at": rep.published_at,
+                "summary": rep.summary,
+                "latest_task": latest.to_dict() if latest else None,
+            }
+        )
+    return {"reports": reports}
+
+
+@app.get("/api/recon/reports/{settle_date}")
+async def get_recon_report(settle_date: str):
+    report = recon_store.get_report(settle_date)
+    if report is None:
+        raise HTTPException(status_code=404, detail="该结算日暂无已发布报告")
+    return report.to_dict()
+
+
+class OrderIn(BaseModel):
+    order_no: str = Field(min_length=1, max_length=64)
+    merchant_id: int
+    amount: Decimal
+    fee: Decimal
+    settle_date: date
+
+
+@app.post("/api/orders", status_code=201)
+async def create_order(body: OrderIn):
+    """补记一笔结算订单；进行中的核对事务使用同一快照，看不到这笔新单。"""
+    if pool is None:
+        raise HTTPException(status_code=503, detail="数据库未就绪")
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO settlement_orders (order_no, merchant_id, amount, fee, status, settle_date)
+                VALUES ($1, $2, $3, $4, 'SETTLED', $5)
+                RETURNING order_id, order_no, merchant_id, amount, fee, status, settle_date
+                """,
+                body.order_no.strip(),
+                body.merchant_id,
+                body.amount,
+                body.fee,
+                body.settle_date,
+            )
+    except asyncpg.ForeignKeyViolationError:
+        raise HTTPException(status_code=400, detail=f"商户 {body.merchant_id} 不存在")
+    return {"ok": True, "row": _jsonable(dict(row))}
+
+
+# ---------------- SQL 计划对照（保留原功能） ----------------
 
 class BatchIn(BaseModel):
     sql: str = Field(min_length=1, max_length=20000)

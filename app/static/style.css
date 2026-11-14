@@ -14,6 +14,16 @@ header {
   color: #fff;
 }
 header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+.tabs { display: flex; gap: 4px; }
+.tab {
+  background: transparent;
+  color: #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 14px;
+}
+.tab:hover { background: #334155; }
+.tab.active { background: #2563eb; color: #fff; }
 main { max-width: 1080px; margin: 20px auto; padding: 0 16px; }
 h2 { font-size: 16px; margin: 0 0 8px; }
 .card {
@@ -138,3 +148,39 @@ pre.plan {
   overflow: auto;
 }
 details summary { cursor: pointer; font-size: 13px; color: #2563eb; margin: 6px 0; }
+
+/* 流水核对 */
+input[type="date"], input[type="number"], input[type="text"], input:not([type]) {
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+input[type="file"] { font-size: 13px; }
+#ord-no { width: 180px; }
+#ord-merchant { width: 110px; }
+#ord-amount, #ord-fee { width: 110px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.chip {
+  font-size: 13px;
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: #eef2f7;
+  color: #334155;
+}
+.chip.ok { background: #dcfce7; color: #14532d; }
+.chip.bad { background: #fee2e2; color: #7f1d1d; }
+.notice {
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin: 10px 0;
+}
+.notice.warn { background: #fef9c3; color: #713f12; }
+.notice.info { background: #e0f2fe; color: #0c4a6e; }
+.notice.ok { background: #dcfce7; color: #14532d; }
+.ex-status.published { color: #16a34a; }
+.ex-status.stale { color: #d97706; }
+.ex-status.failed { color: #dc2626; }
+.ex-status.running { color: #d97706; }
+h3 { font-size: 14px; margin: 14px 0 6px; }
